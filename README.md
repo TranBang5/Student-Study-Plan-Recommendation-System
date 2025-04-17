@@ -1,1 +1,1 @@
-# Student-Study-Plant-Recommendation-System
+# Student-Study-Plan-Recommendation-System
