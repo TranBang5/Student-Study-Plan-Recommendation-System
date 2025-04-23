@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Enter Your Profile</h2>
+<form method="POST">
+    <div>
+        <label for="student_id">Student ID:</label><br>
+        <input type="text" id="student_id" name="student_id" required>
+    </div>
+    <div>
+        <label for="interests">Interests (comma-separated):</label><br>
+        <input type="text" id="interests" name="interests" placeholder="Math,Science" required>
+    </div>
+    <div>
+        <label for="academic_level">Academic Level:</label><br>
+        <select id="academic_level" name="academic_level" required>
+            <option value="">Select Level</option>
+            <option value="Beginner">Beginner</option>
+            <option value="Intermediate">Intermediate</option>
+            <option value="Advanced">Advanced</option>
+        </select>
+    </div>
+    <div>
+        <label for="learning_style">Learning Style:</label><br>
+        <select id="learning_style" name="learning_style" required>
+            <option value="">Select Style</option>
+            <option value="Visual">Visual</option>
+            <option value="Auditory">Auditory</option>
+            <option value="Kinesthetic">Kinesthetic</option>
+        </select>
+    </div>
+    <div>
+        <label for="past_courses">Past Courses (comma-separated):</label><br>
+        <input type="text" id="past_courses" name="past_courses" placeholder="Algebra,Physics">
+    </div>
+    <div>
+        <label for="performance_history">Performance History (JSON):</label><br>
+        <textarea id="performance_history" name="performance_history" placeholder='{"Algebra": 85, "Physics": 90}'></textarea>
+    </div>
+    <button type="submit">Save Profile</button>
+</form>
+{% endblock %}

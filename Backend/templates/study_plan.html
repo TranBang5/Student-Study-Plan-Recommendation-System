@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Your Study Plan</h2>
+<h3>Courses</h3>
+<ul>
+    {% for course_id in plan.courses %}
+    <li>{{ course_id }}</li>
+    {% endfor %}
+</ul>
+<h3>Tutors</h3>
+<ul>
+    {% for tutor_id in plan.tutors %}
+    <li>{{ tutor_id }}</li>
+    {% endfor %}
+</ul>
+<h3>Resources</h3>
+<ul>
+    {% for resource_id in plan.resources %}
+    <li>{{ resource_id }}</li>
+    {% endfor %}
+</ul>
+<h3>Schedule</h3>
+{% for date, activities in plan.schedule.items() %}
+<div>
+    <strong>{{ date }}</strong>: {{ activities | join(', ') }}
+</div>
+{% endfor %}
+<a href="{{ url_for('profile') }}">Create New Profile</a>
+{% endblock %}
