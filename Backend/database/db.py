@@ -1,6 +1,6 @@
 import mysql.connector
 from mysql.connector import Error
-from .entities import StudentProfile, Course, Tutor, Resource, StudyPlan
+from ..models.entities import StudentProfile, Course, Tutor, Resource, StudyPlan
 import json
 
 class Database:

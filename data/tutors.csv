@@ -1,0 +1,12 @@
+tutor_id,expertise,experience_years,teaching_style
+t1,"english",20,in_person
+t2,"literature",12,in_person
+t3,"math",10,online
+t4,"physics",22,in_person
+t5,"physics",3,in_person
+t6,"english",25,online
+t7,"geography",10,online
+t8,"math",6,in_person
+t9,"chemistry",11,in_person
+t10,"math",9,in_person
+t11,"biology",20,in_person

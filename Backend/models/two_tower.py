@@ -1,130 +1,250 @@
 import tensorflow as tf
-import tensorflow_recommenders as tfrs
-from typing import List, Dict
+from tensorflow.keras.layers import Input, Embedding, Dense, Concatenate, StringLookup
+from tensorflow.keras.models import Model
 
-class MultiTowerRecommenderModel(tfrs.models.Model):
-    def __init__(self, student_vocab: List[str], course_vocab: List[str], tutor_vocab: List[str], resource_vocab: List[str], embedding_dim: int = 64):
-        super().__init__()
+class TwoTowerModel:
+    def __init__(self, student_vocab, item_vocab):
+        self.student_vocab = student_vocab
+        self.item_vocab = item_vocab
+        self.embedding_dim = 32
 
-        # Student Tower
-        self.student_embedding = tf.keras.Sequential([
-            tf.keras.layers.StringLookup(vocabulary=student_vocab, mask_token=None),
-            tf.keras.layers.Embedding(len(student_vocab) + 1, embedding_dim)
-        ])
-        self.student_dense = tf.keras.Sequential([
-            tf.keras.layers.Dense(128, activation='relu'),
-            tf.keras.layers.Dense(embedding_dim, activation='relu')
-        ])
-
-        # Course Tower
-        self.course_embedding = tf.keras.Sequential([
-            tf.keras.layers.StringLookup(vocabulary=course_vocab, mask_token=None),
-            tf.keras.layers.Embedding(len(course_vocab) + 1, embedding_dim)
-        ])
-        self.course_dense = tf.keras.Sequential([
-            tf.keras.layers.Dense(128, activation='relu'),
-            tf.keras.layers.Dense(embedding_dim, activation='relu')
-        ])
-
-        # Tutor Tower
-        self.tutor_embedding = tf.keras.Sequential([
-            tf.keras.layers.StringLookup(vocabulary=tutor_vocab, mask_token=None),
-            tf.keras.layers.Embedding(len(tutor_vocab) + 1, embedding_dim)
-        ])
-        self.tutor_dense = tf.keras.Sequential([
-            tf.keras.layers.Dense(128, activation='relu'),
-            tf.keras.layers.Dense(embedding_dim, activation='relu')
-        ])
-
-        # Resource Tower
-        self.resource_embedding = tf.keras.Sequential([
-            tf.keras.layers.StringLookup(vocabulary=resource_vocab, mask_token=None),
-            tf.keras.layers.Embedding(len(resource_vocab) + 1, embedding_dim)
-        ])
-        self.resource_dense = tf.keras.Sequential([
-            tf.keras.layers.Dense(128, activation='relu'),
-            tf.keras.layers.Dense(embedding_dim, activation='relu')
-        ])
-
-        # Retrieval tasks for each item type
-        self.course_task = tfrs.tasks.Retrieval(
-            metrics=tfrs.metrics.FactorizedTopK(
-                candidates=tf.data.Dataset.from_tensor_slices(course_vocab).batch(128).map(self.course_embedding)
-            )
-        )
-        self.tutor_task = tfrs.tasks.Retrieval(
-            metrics=tfrs.metrics.FactorizedTopK(
-                candidates=tf.data.Dataset.from_tensor_slices(tutor_vocab).batch(128).map(self.tutor_embedding)
-            )
-        )
-        self.resource_task = tfrs.tasks.Retrieval(
-            metrics=tfrs.metrics.FactorizedTopK(
-                candidates=tf.data.Dataset.from_tensor_slices(resource_vocab).batch(128).map(self.resource_embedding)
-            )
-        )
-
-    def call(self, inputs):
-        # Student embedding
-        student_emb = self.student_embedding(inputs['student_id'])
-        student_features = tf.concat([
-            student_emb,
-            inputs['interests'],
-            inputs['academic_level'],
-            inputs['learning_style']
-        ], axis=1)
-        student_vector = self.student_dense(student_features)
-
-        # Course embedding
-        course_emb = self.course_embedding(inputs['item_id'])
-        course_features = tf.concat([course_emb, inputs['features']], axis=1)
-        course_vector = self.course_dense(course_features)
-
-        # Tutor embedding
-        tutor_emb = self.tutor_embedding(inputs['item_id'])
-        tutor_features = tf.concat([tutor_emb, inputs['features']], axis=1)
-        tutor_vector = self.tutor_dense(tutor_features)
-
-        # Resource embedding
-        resource_emb = self.resource_embedding(inputs['item_id'])
-        resource_features = tf.concat([resource_emb, inputs['features']], axis=1)
-        resource_vector = self.resource_dense(resource_features)
-
-        return {
-            'student_vector': student_vector,
-            'course_vector': course_vector,
-            'tutor_vector': tutor_vector,
-            'resource_vector': resource_vector
+    def build_student_tower(self):
+        # Student inputs
+        student_inputs = {
+            'student_id': Input(name='student_id', shape=(1,), dtype=tf.string),
+            'interests': Input(name='interests', shape=(None,), dtype=tf.string),
+            'academic_level': Input(name='academic_level', shape=(1,), dtype=tf.string),
+            'learning_style': Input(name='learning_style', shape=(1,), dtype=tf.string)
         }
 
-    def compute_loss(self, inputs, training: bool = False) -> tf.Tensor:
-        outputs = self(inputs)
-        student_vector = outputs['student_vector']
-        
-        # Compute loss for each item type based on item_type
-        course_mask = tf.equal(inputs['item_type'], 1.0)
-        tutor_mask = tf.equal(inputs['item_type'], 2.0)
-        resource_mask = tf.equal(inputs['item_type'], 3.0)
+        # Embeddings
+        student_id_vectorized = StringLookup(
+            vocabulary=self.student_vocab['student_id']
+        )(student_inputs['student_id'])
+        student_id_embedding = Embedding(
+            input_dim=len(self.student_vocab['student_id']) + 1,
+            output_dim=self.embedding_dim
+        )(student_id_vectorized)
 
-        course_loss = tf.where(
-            course_mask,
-            self.course_task(student_vector, outputs['course_vector'], compute_metrics=not training),
-            0.0
+        interests_vectorized = StringLookup(
+            vocabulary=self.student_vocab['interests'],
+            output_mode='multi_hot'
+        )(student_inputs['interests'])
+        interests_embedding = Dense(self.embedding_dim)(interests_vectorized)
+
+        academic_level_vectorized = StringLookup(
+            vocabulary=self.student_vocab['academic_level']
+        )(student_inputs['academic_level'])
+        academic_level_embedding = Embedding(
+            input_dim=len(self.student_vocab['academic_level']) + 1,
+            output_dim=self.embedding_dim
+        )(academic_level_vectorized)
+
+        learning_style_vectorized = StringLookup(
+            vocabulary=self.student_vocab['learning_style']
+        )(student_inputs['learning_style'])
+        learning_style_embedding = Embedding(
+            input_dim=len(self.student_vocab['learning_style']) + 1,
+            output_dim=self.embedding_dim
+        )(learning_style_vectorized)
+
+        # Concatenate embeddings
+        student_embeddings = Concatenate()([
+            student_id_embedding,
+            interests_embedding,
+            academic_level_embedding,
+            learning_style_embedding
+        ])
+        student_output = Dense(self.embedding_dim, activation='relu')(student_embeddings)
+
+        return student_inputs, student_output
+
+    def build_item_tower(self):
+        # Item inputs (resources, courses, tutors)
+        resource_inputs = {
+            'resource_id': Input(name='resource_id', shape=(1,), dtype=tf.string),
+            'topic': Input(name='topic', shape=(1,), dtype=tf.string),
+            'type': Input(name='type', shape=(1,), dtype=tf.string),
+            'level': Input(name='level', shape=(None,), dtype=tf.string)
+        }
+
+        course_inputs = {
+            'course_id': Input(name='course_id', shape=(1,), dtype=tf.string),
+            'subject': Input(name='subject', shape=(1,), dtype=tf.string),
+            'level': Input(name='level', shape=(1,), dtype=tf.string),
+            'format': Input(name='format', shape=(1,), dtype=tf.string)
+        }
+
+        tutor_inputs = {
+            'tutor_id': Input(name='tutor_id', shape=(1,), dtype=tf.string),
+            'expertise': Input(name='expertise', shape=(None,), dtype=tf.string),
+            'experience_years': Input(name='experience_years', shape=(1,), dtype=tf.float32),
+            'teaching_style': Input(name='teaching_style', shape=(1,), dtype=tf.string)
+        }
+
+        # Resource embeddings
+        resource_id_vectorized = StringLookup(
+            vocabulary=self.item_vocab['resource_id']
+        )(resource_inputs['resource_id'])
+        resource_id_embedding = Embedding(
+            input_dim=len(self.item_vocab['resource_id']) + 1,
+            output_dim=self.embedding_dim
+        )(resource_id_vectorized)
+
+        topic_vectorized = StringLookup(
+            vocabulary=self.item_vocab['topic']
+        )(resource_inputs['topic'])
+        topic_embedding = Embedding(
+            input_dim=len(self.item_vocab['topic']) + 1,
+            output_dim=self.embedding_dim
+        )(topic_vectorized)
+
+        type_vectorized = StringLookup(
+            vocabulary=self.item_vocab['type']
+        )(resource_inputs['type'])
+        type_embedding = Embedding(
+            input_dim=len(self.item_vocab['type']) + 1,
+            output_dim=self.embedding_dim
+        )(type_vectorized)
+
+        level_vectorized = StringLookup(
+            vocabulary=self.item_vocab['level'],
+            output_mode='multi_hot'
+        )(resource_inputs['level'])
+        level_embedding = Dense(self.embedding_dim)(level_vectorized)
+
+        resource_embeddings = Concatenate()([
+            resource_id_embedding,
+            topic_embedding,
+            type_embedding,
+            level_embedding
+        ])
+        resource_output = Dense(self.embedding_dim, activation='relu')(resource_embeddings)
+
+        # Course embeddings
+        course_id_vectorized = StringLookup(
+            vocabulary=self.item_vocab['course_id']
+        )(course_inputs['course_id'])
+        course_id_embedding = Embedding(
+            input_dim=len(self.item_vocab['course_id']) + 1,
+            output_dim=self.embedding_dim
+        )(course_id_vectorized)
+
+        subject_vectorized = StringLookup(
+            vocabulary=self.item_vocab['subject']
+        )(course_inputs['subject'])
+        subject_embedding = Embedding(
+            input_dim=len(self.item_vocab['subject']) + 1,
+            output_dim=self.embedding_dim
+        )(subject_vectorized)
+
+        course_level_vectorized = StringLookup(
+            vocabulary=self.item_vocab['level']
+        )(course_inputs['level'])
+        course_level_embedding = Embedding(
+            input_dim=len(self.item_vocab['level']) + 1,
+            output_dim=self.embedding_dim
+        )(course_level_vectorized)
+
+        format_vectorized = StringLookup(
+            vocabulary=self.item_vocab['format']
+        )(course_inputs['format'])
+        format_embedding = Embedding(
+            input_dim=len(self.item_vocab['format']) + 1,
+            output_dim=self.embedding_dim
+        )(format_vectorized)
+
+        course_embeddings = Concatenate()([
+            course_id_embedding,
+            subject_embedding,
+            course_level_embedding,
+            format_embedding
+        ])
+        course_output = Dense(self.embedding_dim, activation='relu')(course_embeddings)
+
+        # Tutor embeddings
+        tutor_id_vectorized = StringLookup(
+            vocabulary=self.item_vocab['tutor_id']
+        )(tutor_inputs['tutor_id'])
+        tutor_id_embedding = Embedding(
+            input_dim=len(self.item_vocab['tutor_id']) + 1,
+            output_dim=self.embedding_dim
+        )(tutor_id_vectorized)
+
+        expertise_vectorized = StringLookup(
+            vocabulary=self.item_vocab['expertise'],
+            output_mode='multi_hot'
+        )(tutor_inputs['expertise'])
+        expertise_embedding = Dense(self.embedding_dim)(expertise_vectorized)
+
+        experience_embedding = Dense(self.embedding_dim)(
+            tf.expand_dims(tutor_inputs['experience_years'], axis=-1)
         )
-        tutor_loss = tf.where(
-            tutor_mask,
-            self.tutor_task(student_vector, outputs['tutor_vector'], compute_metrics=not training),
-            0.0
+
+        teaching_style_vectorized = StringLookup(
+            vocabulary=self.item_vocab['teaching_style']
+        )(tutor_inputs['teaching_style'])
+        teaching_style_embedding = Embedding(
+            input_dim=len(self.item_vocab['teaching_style']) + 1,
+            output_dim=self.embedding_dim
+        )(teaching_style_vectorized)
+
+        tutor_embeddings = Concatenate()([
+            tutor_id_embedding,
+            expertise_embedding,
+            experience_embedding,
+            teaching_style_embedding
+        ])
+        tutor_output = Dense(self.embedding_dim, activation='relu')(tutor_embeddings)
+
+        return (
+            [resource_inputs, course_inputs, tutor_inputs],
+            [resource_output, course_output, tutor_output]
         )
-        resource_loss = tf.where(
-            resource_mask,
-            self.resource_task(student_vector, outputs['resource_vector'], compute_metrics=not training),
-            0.0
+
+    def build_model(self):
+        student_inputs, student_output = self.build_student_tower()
+        item_inputs, item_outputs = self.build_item_tower()
+
+        # Compute dot product for recommendation
+        resource_score = tf.keras.layers.Dot(axes=1)([student_output, item_outputs[0]])
+        course_score = tf.keras.layers.Dot(axes=1)([student_output, item_outputs[1]])
+        tutor_score = tf.keras.layers.Dot(axes=1)([student_output, item_outputs[2]])
+
+        # Combine inputs
+        inputs = {**student_inputs, **item_inputs[0], **item_inputs[1], **item_inputs[2]}
+        outputs = [resource_score, course_score, tutor_score]
+
+        model = Model(inputs=inputs, outputs=outputs)
+        model.compile(
+            optimizer='adam',
+            loss='mse',
+            metrics=['mae']
         )
+        return model
 
-        return tf.reduce_mean(course_loss + tutor_loss + resource_loss)
+if __name__ == "__main__":
+    # Example vocabularies (replace with actual data)
+    student_vocab = {
+        'student_id': [f's{i+1}' for i in range(67)],
+        'interests': ['math', 'literature', 'physics', 'chemistry', 'english', 'history', 'geography', 'biology'],
+        'academic_level': [f'grade_{i}' for i in range(6, 13)],
+        'learning_style': ['in_person', 'online']
+    }
+    item_vocab = {
+        'resource_id': [f'r{i+1}' for i in range(25)],
+        'topic': ['math', 'literature', 'physics', 'chemistry', 'english', 'history', 'geography', 'biology'],
+        'type': ['paper', 'digital'],
+        'level': [f'grade_{i}' for i in range(6, 13)],
+        'course_id': [f'c{i+1}' for i in range(96)],
+        'subject': ['math', 'literature', 'physics', 'chemistry', 'english', 'history', 'geography', 'biology'],
+        'format': ['in_person', 'online'],
+        'tutor_id': [f't{i+1}' for i in range(11)],
+        'expertise': ['math', 'literature', 'physics', 'chemistry', 'english', 'history', 'geography', 'biology'],
+        'teaching_style': ['in_person', 'online']
+    }
 
-    def save_model(self, path: str):
-        self.save_weights(path)
-
-    def load_model(self, path: str):
-        self.load_weights(path)
+    # Build and summarize model
+    model = TwoTowerModel(student_vocab, item_vocab)
+    two_tower_model = model.build_model()
+    two_tower_model.summary()

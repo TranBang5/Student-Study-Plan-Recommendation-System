@@ -1,65 +1,75 @@
-from mysql.connector import Error
-from ..database.db import Database
-import json
+import pandas as pd
+import csv
 
-def fetch_interactions(db_config):
-    db = Database(db_config)
-    cursor = db.conn.cursor(dictionary=True)
-    try:
-        cursor.execute("""
-            SELECT i.student_id, i.item_id, i.interaction_type,
-                   s.interests, s.academic_level, s.learning_style
-            FROM interactions i
-            JOIN students s ON i.student_id = s.student_id
-        """)
-        interactions = []
-        for row in cursor.fetchall():
-            academic_level = {'Beginner': 1.0, 'Intermediate': 2.0, 'Advanced': 3.0}.get(row['academic_level'], 0.0)
-            learning_style = {'Visual': 1.0, 'Auditory': 2.0, 'Kinesthetic': 3.0}.get(row['learning_style'], 0.0)
-            item_type = {'course_enroll': 1.0, 'tutor_hire': 2.0, 'resource_use': 3.0}.get(row['interaction_type'], 0.0)
-            interests = json.loads(row['interests'])
-            interests_vector = [1.0 if s in interests else 0.0 for s in ['Math', 'Science', 'Literature']]
-            item_features = get_item_features(db, row['item_id'], row['interaction_type'])
-            interactions.append({
-                'student_id': row['student_id'],
-                'item_id': row['item_id'],
-                'interests': interests_vector,
-                'academic_level': [academic_level],
-                'learning_style': [learning_style],
-                'item_type': [item_type],
-                'features': item_features
-            })
-        return interactions
-    finally:
-        cursor.close()
+def load_data():
+    # Read CSV files with proper quoting
+    students = pd.read_csv('/app/data/students.csv', quoting=csv.QUOTE_NONNUMERIC)
+    courses = pd.read_csv('/app/data/courses.csv', quoting=csv.QUOTE_NONNUMERIC)
+    tutors = pd.read_csv('/app/data/tutors.csv', quoting=csv.QUOTE_NONNUMERIC)
+    resources = pd.read_csv('/app/data/resources.csv', quoting=csv.QUOTE_NONNUMERIC)
+    interactions = pd.read_csv('/app/data/interactions.csv', quoting=csv.QUOTE_NONNUMERIC)
 
-def get_item_features(db, item_id, interaction_type):
-    cursor = db.conn.cursor(dictionary=True)
-    try:
-        if interaction_type == 'course_enroll':
-            cursor.execute("SELECT subject, difficulty, format FROM courses WHERE course_id = %s", (item_id,))
-            row = cursor.fetchone()
-            return [
-                {'Math': 1.0, 'Science': 2.0, 'Literature': 3.0}.get(row['subject'], 0.0),
-                {'Beginner': 1.0, 'Intermediate': 2.0, 'Advanced': 3.0}.get(row['difficulty'], 0.0),
-                {'online': 1.0, 'offline': 2.0, 'hybrid': 3.0}.get(row['format'], 0.0)
-            ]
-        elif interaction_type == 'tutor_hire':
-            cursor.execute("SELECT expertise, teaching_style, rating FROM tutors WHERE tutor_id = %s", (item_id,))
-            row = cursor.fetchone()
-            expertise = json.loads(row['expertise'])
-            expertise_vector = [1.0 if s in expertise else 0.0 for s in ['Math', 'Science', 'Literature']]
-            return expertise_vector + [
-                {'Interactive': 1.0, 'Lecture': 2.0}.get(row['teaching_style'], 0.0),
-                row['rating']
-            ]
-        else:  # resource_use
-            cursor.execute("SELECT subject, format, difficulty FROM resources WHERE resource_id = %s", (item_id,))
-            row = cursor.fetchone()
-            return [
-                {'Math': 1.0, 'Science': 2.0, 'Literature': 3.0}.get(row['subject'], 0.0),
-                {'video': 1.0, 'pdf': 2.0, 'article': 3.0}.get(row['format'], 0.0),
-                {'Beginner': 1.0, 'Intermediate': 2.0, 'Advanced': 3.0}.get(row['difficulty'], 0.0)
-            ]
-    finally:
-        cursor.close()
+    # Split comma-separated fields into lists
+    students['interests'] = students['interests'].str.split(',')
+    resources['level'] = resources['level'].str.split(',')
+    tutors['expertise'] = tutors['expertise'].str.split(',')
+    interactions['schedule'] = interactions['schedule'].apply(
+        lambda x: x.split('|') if '|' in x else [x]
+    )
+
+    return {
+        'students': students,
+        'courses': courses,
+        'tutors': tutors,
+        'resources': resources,
+        'interactions': interactions
+    }
+
+def get_student_data(student_id, data):
+    # Get student information
+    student = data['students'][data['students']['student_id'] == student_id]
+    if student.empty:
+        return None
+    return {
+        'student_id': student_id,
+        'interests': student['interests'].iloc[0],
+        'academic_level': student['academic_level'].iloc[0],
+        'learning_style': student['learning_style'].iloc[0]
+    }
+
+def get_recommendation_inputs(student_id, data):
+    # Prepare inputs for recommendation model
+    student_data = get_student_data(student_id, data)
+    if not student_data:
+        return None
+
+    # Filter resources based on academic_level
+    student_level = student_data['academic_level']
+    matching_resources = data['resources'][
+        data['resources']['level'].apply(lambda x: student_level in x)
+    ]
+
+    # Filter courses and tutors based on level and interests
+    matching_courses = data['courses'][
+        (data['courses']['level'] == student_level) &
+        (data['courses']['subject'].isin(student_data['interests']))
+    ]
+    matching_tutors = data['tutors'][
+        data['tutors']['expertise'].apply(
+            lambda x: any(subject in x for subject in student_data['interests'])
+        )
+    ]
+
+    return {
+        'student': student_data,
+        'resources': matching_resources.to_dict('records'),
+        'courses': matching_courses.to_dict('records'),
+        'tutors': matching_tutors.to_dict('records')
+    }
+
+if __name__ == "__main__":
+    data = load_data()
+    print("Students:\n", data['students'].head())
+    print("\nResources:\n", data['resources'].head())
+    print("\nSample recommendation inputs for s1:")
+    print(get_recommendation_inputs('s1', data))
